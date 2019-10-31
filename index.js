@@ -200,7 +200,7 @@ module.exports = {
               } else {
                 debug(
                   `Couldn't find original request for redirect response: ${
-                    params.requestId
+                  params.requestId
                   }`
                 );
               }
@@ -209,7 +209,7 @@ module.exports = {
             if (!page) {
               debug(
                 `Request will be sent with requestId ${
-                  params.requestId
+                params.requestId
                 } that can't be mapped to any page at the moment.`
               );
               // ignoredRequests.add(params.requestId);
@@ -247,7 +247,7 @@ module.exports = {
             if (!entry) {
               debug(
                 `Received requestServedFromCache for requestId ${
-                  params.requestId
+                params.requestId
                 } with no matching request.`
               );
               continue;
@@ -286,7 +286,7 @@ module.exports = {
             if (!entry) {
               debug(
                 `Received network response for requestId ${
-                  params.requestId
+                params.requestId
                 } with no matching request.`
               );
               continue;
@@ -298,7 +298,7 @@ module.exports = {
             if (!page) {
               debug(
                 `Received network response for requestId ${
-                  params.requestId
+                params.requestId
                 } that can't be mapped to any page.`
               );
               continue;
@@ -335,7 +335,7 @@ module.exports = {
             if (!entry) {
               debug(
                 `Received network data for requestId ${
-                  params.requestId
+                params.requestId
                 } with no matching request.`
               );
               continue;
@@ -366,7 +366,7 @@ module.exports = {
             if (!entry) {
               debug(
                 `Network loading finished for requestId ${
-                  params.requestId
+                params.requestId
                 } with no matching request.`
               );
               continue;
@@ -375,15 +375,15 @@ module.exports = {
             const timings = entry.timings || {};
             timings.receive = formatMillis(
               (params.timestamp - entry._requestTime) * 1000 -
-                entry.__receiveHeadersEnd
+              entry.__receiveHeadersEnd
             );
             entry.time =
-              max(0, timings.blocked) +
-              max(0, timings.dns) +
-              max(0, timings.connect) +
-              max(0, timings.send) +
-              max(0, timings.wait) +
-              max(0, timings.receive);
+              Math.floor(1000 * max(0, timings.blocked) +
+                max(0, timings.dns) +
+                max(0, timings.connect) +
+                max(0, timings.send) +
+                max(0, timings.wait) +
+                max(0, timings.receive)) / 1000;
 
             // For cached entries, Network.loadingFinished can have an earlier
             // timestamp than Network.dataReceived
@@ -476,7 +476,7 @@ module.exports = {
             if (!entry) {
               debug(
                 `Network loading failed for requestId ${
-                  params.requestId
+                params.requestId
                 } with no matching request.`
               );
               continue;
@@ -486,7 +486,7 @@ module.exports = {
             // represent.
             debug(
               `Failed to load url '${entry.request.url}' (canceled: ${
-                params.canceled
+              params.canceled
               })`
             );
             entries = entries.filter(
@@ -504,7 +504,7 @@ module.exports = {
             if (!entry) {
               debug(
                 `Received resourceChangedPriority for requestId ${
-                  params.requestId
+                params.requestId
                 } with no matching request.`
               );
               continue;
