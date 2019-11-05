@@ -38,7 +38,7 @@ function addFromFirstRequest(page, params) {
   }
 }
 
-function attachCustomProps(params, entry, shouldInclude) {
+function attachCustomProps(entry, params, shouldInclude) {
   if (shouldInclude) {
     const custom = params['_custom'];
     if (custom) {
