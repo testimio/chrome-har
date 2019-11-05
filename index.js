@@ -22,7 +22,8 @@ const defaultOptions = {
   includeCustomProperties: false,
   name: 'Testim',
   version: '1.0',
-  comment: 'Created during a text executed by Testim.'
+  comment: 'Created during a text executed by Testim.',
+  meta: undefined
 };
 const isEmpty = o => !o;
 
@@ -601,7 +602,8 @@ module.exports = {
         version: '1.2',
         creator: { name: options.name, version: options.version, comment: options.comment },
         pages,
-        entries
+        entries,
+        _meta: options.meta
       }
     };
   }
