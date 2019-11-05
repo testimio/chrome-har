@@ -1,7 +1,5 @@
 'use strict';
 
-const { name, version, homepage } = require('./package');
-
 const urlParser = require('url');
 const uuid = require('uuid/v1');
 const dayjs = require('dayjs');
@@ -20,7 +18,11 @@ const populateEntryFromResponse = require('./lib/entryFromResponse');
 
 const defaultOptions = {
   includeResourcesFromDiskCache: false,
-  includeTextFromResponseBody: false
+  includeTextFromResponseBody: false,
+  includeCustomProperties: false,
+  name: 'Testim',
+  version: '1.0',
+  comment: 'Created during a text executed by Testim.'
 };
 const isEmpty = o => !o;
 
@@ -33,6 +35,33 @@ function addFromFirstRequest(page, params) {
     page.startedDateTime = dayjs.unix(params.wallTime).toISOString(); //epoch float64, eg 1440589909.59248
     // URL is better than blank, and it's what devtools uses.
     page.title = page.title === '' ? params.request.url : page.title;
+  }
+}
+
+function attachCustomProps(params, entry, shouldInclude) {
+  if (shouldInclude) {
+    const custom = params['_custom'];
+    if (custom) {
+      entry._testim = Object.assign(entry._testim || {}, custom);
+    }
+  }
+}
+
+function blockedResponse() {
+  return {
+    "status": 0,
+    "statusText": "",
+    "httpVersion": "",
+    "headers": [],
+    "cookies": [],
+    "content": {
+      "size": 0,
+      "mimeType": "x-unknown"
+    },
+    "redirectURL": "",
+    "headersSize": -1,
+    "bodySize": -1,
+    "_transferSize": 0
   }
 }
 
@@ -160,6 +189,8 @@ module.exports = {
               _initiator_detail: JSON.stringify(params.initiator),
               _initiator_type: params.initiator.type
             };
+
+            attachCustomProps(entry, params, options.includeCustomProperties);
 
             // The object initiator change according to its type
             switch (params.initiator.type) {
@@ -293,7 +324,7 @@ module.exports = {
               );
               continue;
             }
-
+            attachCustomProps(entry, params, options.includeCustomProperties);
             const frameId =
               rootFrameMappings.get(params.frameId) || params.frameId;
             const page = pages.find(page => page.__frameId === frameId);
@@ -373,7 +404,7 @@ module.exports = {
               );
               continue;
             }
-
+            attachCustomProps(entry, params, options.includeCustomProperties);
             const timings = entry.timings || {};
             timings.receive = formatMillis(
               (params.timestamp - entry._requestTime) * 1000 -
@@ -484,16 +515,10 @@ module.exports = {
               continue;
             }
 
-            // This could be due to incorrect domain name etc. Sad, but unfortunately not something that a HAR file can
-            // represent.
-            debug(
-              `Failed to load url '${entry.request.url}' (canceled: ${
-              params.canceled
-              })`
-            );
-            entries = entries.filter(
-              entry => entry._requestId !== params.requestId
-            );
+            attachCustomProps(entry, params, options.includeCustomProperties);
+            entry._transferSize = 0;
+            entry.response = Object.assign(entry.response || blockedResponse(), { _error: params.errorText });
+            entry.serverIPAddress = "";
           }
           break;
 
@@ -576,7 +601,7 @@ module.exports = {
     return {
       log: {
         version: '1.2',
-        creator: { name, version, comment: homepage },
+        creator: { name: options.name, version: options.version, comment: options.comment },
         pages,
         entries
       }
