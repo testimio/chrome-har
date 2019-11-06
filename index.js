@@ -52,7 +52,7 @@ function blockedResponse() {
   return {
     "status": 0,
     "statusText": "",
-    "httpVersion": "",
+    "httpVersion": "-",
     "headers": [],
     "cookies": [],
     "content": {
@@ -63,6 +63,19 @@ function blockedResponse() {
     "headersSize": -1,
     "bodySize": -1,
     "_transferSize": 0
+  }
+}
+
+function blockedTimings() {
+  return {
+    blocked: -1,
+    connect: -1,
+    dns: -1,
+    receive: -1,
+    send: -1,
+    ssl: -1,
+    wait: -1,
+    _queued: -1
   }
 }
 
@@ -516,7 +529,9 @@ module.exports = {
 
             attachCustomProps(entry, params, options.includeCustomProperties);
             entry._transferSize = 0;
+            entry.request.httpVersion = entry.request.httpVersion || "-";
             entry.response = Object.assign(entry.response || blockedResponse(), { _error: params.errorText });
+            entry.timings = entry.timings || blockedTimings();
             entry.serverIPAddress = "";
           }
           break;
