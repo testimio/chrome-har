@@ -108,7 +108,7 @@ module.exports = {
         case 'Page.navigatedWithinDocument':
           {
             const frameId = params.frameId;
-            const rootFrame = rootFrameMappings.get(frameId) || frameId;
+            const rootFrame = rootFrameMappings.get(frameId);
             if (pages.some(page => page.__frameId === rootFrame)) {
               continue;
             }
@@ -533,7 +533,7 @@ module.exports = {
             entry.response = Object.assign(entry.response || blockedResponse(), { _error: params.errorText });
             entry.timings = entry.timings || blockedTimings();
             entry.serverIPAddress = "";
-            entry.comment = `failed ${params.errorText}${params.blockedReason ? ` reason: ${params.blockedReason}` :''}`
+            entry.comment = `Error: ${params.errorText}${params.blockedReason ? `. Reason: ${params.blockedReason}` :''}`
           }
           break;
 
