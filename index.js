@@ -36,7 +36,7 @@ function addFromFirstRequest(page, params) {
     page.startedDateTime = dayjs.unix(params.wallTime).toISOString(); //epoch float64, eg 1440589909.59248
     // URL is better than blank, and it's what devtools uses.
     page.title = page.title === '' ? params.request.url : page.title;
-    if(!page.__loaderId && params.request.loaderId) {
+    if (!page.__loaderId && params.request.loaderId) {
       page.__loaderId = params.request.loaderId;
     }
   }
@@ -143,7 +143,7 @@ module.exports = {
           }
 
           // already seen this navigation
-          if (pages.find(page => page.__loaderId === params.frame.loaderId)) {
+          if (pages.some(page => page.__loaderId === params.frame.loaderId)) {
             continue;
           }
 
@@ -166,7 +166,9 @@ module.exports = {
             addFromFirstRequest(page, firstRequest);
           }
           pages.push(page);
-          attachPagelessRequests(page);
+          if (pages.length === 1) {
+            attachPagelessRequests(page);
+          }
           continue;
         }
         case 'Page.frameStartedLoading':
@@ -190,7 +192,9 @@ module.exports = {
               __frameId: rootFrame
             };
             pages.push(page);
-            attachPagelessRequests(page);
+            if (pages.length === 1) {
+              attachPagelessRequests(page);
+            }
           }
           break;
 
