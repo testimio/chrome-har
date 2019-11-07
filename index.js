@@ -84,7 +84,8 @@ module.exports = {
     options = Object.assign({}, defaultOptions, options);
 
     const ignoredRequests = new Set(),
-      rootFrameMappings = new Map();
+      rootFrameMappings = new Map(),
+      loaders = new Map();
 
     let pages = [],
       entries = [],
@@ -103,15 +104,49 @@ module.exports = {
       }
 
       switch (method) {
+        case 'Page.frameNavigated': {
+          // not the root
+          if (params.frame.parentId) {
+            continue;
+          }
+
+          // already seen this navigation
+          if (pages.find(page => page.__loaderId === params.frame.loaderId)) {
+            continue;
+          }
+
+          const prevRoot = pages.find(page => page.__frameId === undefined);
+          if (prevRoot && prevRoot.loaderId) {
+            prevRoot.__frameId = "removed";
+          }
+
+          currentPageId = uuid();
+          const page = {
+            id: currentPageId,
+            startedDateTime: '',
+            title: params.frame.url,
+            pageTimings: {},
+            __loader: params.frame.loaderId,
+            __frameId: params.frame.frameId,
+          };
+          const firstRequest = loaders.get(params.frame.loaderId);
+          if (firstRequest) {
+            addFromFirstRequest(page, firstRequest);
+          }
+          pages.push(page);
+
+          continue;
+        }
         case 'Page.frameStartedLoading':
         case 'Page.frameScheduledNavigation':
         case 'Page.navigatedWithinDocument':
           {
             const frameId = params.frameId;
-            const rootFrame = rootFrameMappings.get(frameId);
+            const rootFrame = rootFrameMappings.get(frameId) || frameId;
             if (pages.some(page => page.__frameId === rootFrame)) {
               continue;
             }
+
             currentPageId = uuid();
             const title =
               method === 'Page.navigatedWithinDocument' ? params.url : '';
@@ -158,6 +193,10 @@ module.exports = {
             if (!isSupportedProtocol(request.url)) {
               ignoredRequests.add(params.requestId);
               continue;
+            }
+            // set this request as the loader for the page.
+            if (!loaders.has(params.loaderId)) {
+              loaders.set(params.loaderId, params);
             }
             const page = pages[pages.length - 1];
             const cookieHeader = getHeaderValue(request.headers, 'Cookie');
@@ -535,7 +574,7 @@ module.exports = {
             entry.response = Object.assign(entry.response || blockedResponse(), { _error: params.errorText });
             entry.timings = entry.timings || blockedTimings();
             entry.serverIPAddress = "";
-            entry.comment = `Error: ${params.errorText}${params.blockedReason ? `. Reason: ${params.blockedReason}` :''}`
+            entry.comment = `Error: ${params.errorText}${params.blockedReason ? `. Reason: ${params.blockedReason}` : ''}`
           }
           break;
 
