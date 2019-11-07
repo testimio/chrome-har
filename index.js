@@ -36,6 +36,9 @@ function addFromFirstRequest(page, params) {
     page.startedDateTime = dayjs.unix(params.wallTime).toISOString(); //epoch float64, eg 1440589909.59248
     // URL is better than blank, and it's what devtools uses.
     page.title = page.title === '' ? params.request.url : page.title;
+    if(!page.__loaderId && params.request.loaderId) {
+      page.__loaderId = params.request.loaderId;
+    }
   }
 }
 
@@ -94,6 +97,35 @@ module.exports = {
       paramsWithoutPage = [],
       currentPageId;
 
+    function attachPagelessRequests(page) {
+      // do we have any unmmapped requests, add them
+      if (entriesWithoutPage.length > 0) {
+        // update page
+        for (let entry of entriesWithoutPage) {
+          entry.pageref = page.id;
+        }
+        entries = entries.concat(entriesWithoutPage);
+        addFromFirstRequest(page, paramsWithoutPage[0]);
+      }
+      if (responsesWithoutPage.length > 0) {
+        for (let params of responsesWithoutPage) {
+          let entry = entries.find(
+            entry => entry._requestId === params.requestId
+          );
+          if (entry) {
+            populateEntryFromResponse(
+              entry,
+              params.response,
+              page,
+              options
+            );
+          } else {
+            debug(`Couln't find matching request for response`);
+          }
+        }
+      }
+    }
+
     for (const message of messages) {
       const params = message.params;
 
@@ -126,7 +158,7 @@ module.exports = {
             startedDateTime: '',
             title: params.frame.url,
             pageTimings: {},
-            __loader: params.frame.loaderId,
+            __loaderId: params.frame.loaderId,
             __frameId: params.frame.frameId,
           };
           const firstRequest = loaders.get(params.frame.loaderId);
@@ -134,7 +166,7 @@ module.exports = {
             addFromFirstRequest(page, firstRequest);
           }
           pages.push(page);
-
+          attachPagelessRequests(page);
           continue;
         }
         case 'Page.frameStartedLoading':
@@ -158,32 +190,7 @@ module.exports = {
               __frameId: rootFrame
             };
             pages.push(page);
-            // do we have any unmmapped requests, add them
-            if (entriesWithoutPage.length > 0) {
-              // update page
-              for (let entry of entriesWithoutPage) {
-                entry.pageref = page.id;
-              }
-              entries = entries.concat(entriesWithoutPage);
-              addFromFirstRequest(page, paramsWithoutPage[0]);
-            }
-            if (responsesWithoutPage.length > 0) {
-              for (let params of responsesWithoutPage) {
-                let entry = entries.find(
-                  entry => entry._requestId === params.requestId
-                );
-                if (entry) {
-                  populateEntryFromResponse(
-                    entry,
-                    params.response,
-                    page,
-                    options
-                  );
-                } else {
-                  debug(`Couln't find matching request for response`);
-                }
-              }
-            }
+            attachPagelessRequests(page);
           }
           break;
 
