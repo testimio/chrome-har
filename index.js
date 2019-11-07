@@ -38,8 +38,8 @@ function addFromFirstRequest(page, params) {
     page.title = page.title === '' ? params.request.url : page.title;
   }
 
-  if (!page.__loaderId && params.request.loaderId) {
-    page.__loaderId = params.request.loaderId;
+  if (!page.__loaderId && params.loaderId) {
+    page.__loaderId = params.loaderId;
   }
 }
 
