@@ -52,7 +52,7 @@ function blockedResponse() {
   return {
     "status": 0,
     "statusText": "",
-    "httpVersion": "-",
+    "httpVersion": "",
     "headers": [],
     "cookies": [],
     "content": {
@@ -529,10 +529,11 @@ module.exports = {
 
             attachCustomProps(entry, params, options.includeCustomProperties);
             entry._transferSize = 0;
-            entry.request.httpVersion = entry.request.httpVersion || "-";
+            entry.request.httpVersion = entry.request.httpVersion || "";
             entry.response = Object.assign(entry.response || blockedResponse(), { _error: params.errorText });
             entry.timings = entry.timings || blockedTimings();
             entry.serverIPAddress = "";
+            entry.comment = `failed ${params.errorText}${params.blockedReason ? ` reason: ${params.blockedReason}` :''}`
           }
           break;
 
