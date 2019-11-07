@@ -36,9 +36,10 @@ function addFromFirstRequest(page, params) {
     page.startedDateTime = dayjs.unix(params.wallTime).toISOString(); //epoch float64, eg 1440589909.59248
     // URL is better than blank, and it's what devtools uses.
     page.title = page.title === '' ? params.request.url : page.title;
-    if (!page.__loaderId && params.request.loaderId) {
-      page.__loaderId = params.request.loaderId;
-    }
+  }
+
+  if (!page.__loaderId && params.request.loaderId) {
+    page.__loaderId = params.request.loaderId;
   }
 }
 
