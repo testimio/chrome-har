@@ -33,7 +33,12 @@ function addFromFirstRequest(page, params) {
   if (!page.__timestamp) {
     page.__wallTime = params.wallTime;
     page.__timestamp = params.timestamp;
-    page.startedDateTime = dayjs.unix(params.wallTime).toISOString(); //epoch float64, eg 1440589909.59248
+    try {
+      page.startedDateTime = dayjs.unix(params.wallTime).toISOString(); //epoch float64, eg 1440589909.59248
+    }
+    catch (err) {
+      throw err;
+    }
     // URL is better than blank, and it's what devtools uses.
     page.title = page.title === '' ? params.request.url : page.title;
   }
@@ -320,9 +325,13 @@ module.exports = {
             addFromFirstRequest(page, params);
             // wallTime is not necessarily monotonic, timestamp is. So calculate startedDateTime from timestamp diffs.
             // (see https://cs.chromium.org/chromium/src/third_party/WebKit/Source/platform/network/ResourceLoadTiming.h?q=requestTime+package:%5Echromium$&dr=CSs&l=84)
-            const entrySecs =
-              page.__wallTime + (params.timestamp - page.__timestamp);
-            entry.startedDateTime = dayjs.unix(entrySecs).toISOString();
+            const entrySecs = page.__wallTime + (params.timestamp - page.__timestamp);
+            try {
+              entry.startedDateTime = dayjs.unix(entrySecs).toISOString();
+            }
+            catch (err) {
+              throw err;
+            }
           }
           break;
 
