@@ -218,7 +218,7 @@ module.exports = {
             const page = pages[pages.length - 1];
             const cookieHeader = getHeaderValue(request.headers, 'Cookie');
 
-            //Before we used to remove the hash framgment because of Chrome do that but:
+            //Before we used to remove the hash fragment because of Chrome do that but:
             // 1. Firefox do not
             // 2. If we remove it, the HAR will not have the same URL as we tested
             // and that makes PageXray generate the wromng URL and we end up with two pages
@@ -295,7 +295,6 @@ module.exports = {
                 populateEntryFromResponse(
                   previousEntry,
                   params.redirectResponse,
-                  page,
                   options
                 );
               } else {
