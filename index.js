@@ -1,5 +1,5 @@
 'use strict';
-
+const { name } = require('../package');
 const urlParser = require('url');
 const uuid = require('uuid/v1');
 const dayjs = require('dayjs');
