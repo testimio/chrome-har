@@ -187,7 +187,7 @@ module.exports = {
             title: params.frame.url,
             pageTimings: {},
             __loaderId: params.frame.loaderId,
-            __frameId: params.frame.frameId,
+            __frameId: params.frame.id,
           };
           const firstRequest = loaders.get(params.frame.loaderId);
           if (firstRequest) {
