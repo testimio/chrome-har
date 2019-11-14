@@ -23,7 +23,15 @@ const defaultOptions = {
   name: 'Testim',
   version: '1.0',
   comment: 'Created during a text executed by Testim.',
-  meta: undefined
+  meta: undefined,
+  wallTimeHelper: {
+    getWallTimeFromTimestamp(timestamp) {
+      return undefined;
+    },
+    getTimestampFromWallTime(wallTime) {
+      return undefined;
+    }
+  }
 };
 const isEmpty = o => !o;
 
@@ -33,12 +41,7 @@ function addFromFirstRequest(page, params) {
   if (!page.__timestamp) {
     page.__wallTime = params.wallTime;
     page.__timestamp = params.timestamp;
-    try {
-      page.startedDateTime = dayjs.unix(params.wallTime).toISOString(); //epoch float64, eg 1440589909.59248
-    }
-    catch (err) {
-      throw err;
-    }
+    page.startedDateTime = dayjs.unix(params.wallTime).toISOString(); //epoch float64, eg 1440589909.59248
     // URL is better than blank, and it's what devtools uses.
     page.title = page.title === '' ? params.request.url : page.title;
   }
@@ -47,6 +50,27 @@ function addFromFirstRequest(page, params) {
     page.__loaderId = params.loaderId;
   }
 }
+
+function addFromFirstResponse(page, params, wallTimeHelper) {
+  const { response, loaderId } = params;
+  if (!page.__timestamp) {
+    page.__timestamp = response.timing.requestTime;
+  }
+
+  const wallTime = wallTimeHelper.getWallTimeFromTimestamp(response.timing.requestTime);
+  if (wallTime) {
+    page.__wallTime = wallTime;
+  }
+
+  page.startedDateTime = dayjs.unix(wallTime).toISOString(); //epoch float64, eg 1440589909.59248
+  // URL is better than blank, and it's what devtools uses.
+  page.title = response.url;
+
+  if (!page.__loaderId && loaderId) {
+    page.__loaderId = loaderId;
+  }
+}
+
 
 function attachCustomProps(entry, params, shouldInclude) {
   if (shouldInclude) {
@@ -122,11 +146,10 @@ module.exports = {
             populateEntryFromResponse(
               entry,
               params.response,
-              page,
               options
             );
           } else {
-            debug(`Couln't find matching request for response`);
+            debug(`Couldn't find matching request for response`);
           }
         }
       }
@@ -170,6 +193,17 @@ module.exports = {
           const firstRequest = loaders.get(params.frame.loaderId);
           if (firstRequest) {
             addFromFirstRequest(page, firstRequest);
+          } else {
+            // try to create a synthetic event.
+            const responseParams = messages.slice(0, 10)
+              .find(x => x.method === 'Network.responseReceived' && x.requestId === x.params.frame.loaderId);
+            
+            if (responseParams) {
+              addFromFirstResponse(page, responseParams, options.wallTimeHelper);
+              const entry = createSyntheticEvent(page, params, responseParams);
+              attachCustomProps(entry, responseParams, options.includeCustomProperties);
+              entries.push(entry);
+            }
           }
           pages.push(page);
           if (pages.length === 1) {
@@ -177,8 +211,6 @@ module.exports = {
           }
           continue;
         }
-        case 'Page.frameStartedLoading':
-        case 'Page.frameScheduledNavigation':
         case 'Page.navigatedWithinDocument':
           {
             const frameId = params.frameId;
@@ -327,12 +359,7 @@ module.exports = {
             // wallTime is not necessarily monotonic, timestamp is. So calculate startedDateTime from timestamp diffs.
             // (see https://cs.chromium.org/chromium/src/third_party/WebKit/Source/platform/network/ResourceLoadTiming.h?q=requestTime+package:%5Echromium$&dr=CSs&l=84)
             const entrySecs = page.__wallTime + (params.timestamp - page.__timestamp);
-            try {
-              entry.startedDateTime = dayjs.unix(entrySecs).toISOString();
-            }
-            catch (err) {
-              throw err;
-            }
+            entry.startedDateTime = dayjs.unix(entrySecs).toISOString();
           }
           break;
 
@@ -411,7 +438,7 @@ module.exports = {
             }
 
             try {
-              populateEntryFromResponse(entry, params.response, page, options);
+              populateEntryFromResponse(entry, params.response, options);
             } catch (e) {
               debug(
                 `Error parsing response: ${JSON.stringify(
@@ -685,3 +712,34 @@ module.exports = {
     };
   }
 };
+
+
+function createSyntheticEvent(page, params, responseParams, options) {
+  const url = urlParser.parse(responseParams.response.url, true);
+  const req = {
+    method: "GET",
+    url: urlParser.format(responseParams.response.url),
+    queryString: toNameValuePairs(url.query),
+    postData: undefined,
+    headersSize: -1,
+    bodySize: 0,
+    cookies: [],
+    headers: []
+  };
+
+  const entry = {
+    cache: {},
+    startedDateTime: page.startedDateTime ? dayjs.unix(page.startedDateTime).toISOString() : '',
+    __requestWillBeSentTime: params.timestamp,
+    __wallTime: page.__wallTime,
+    _requestId: responseParams.requestId,
+    __frameId: responseParams.frameId,
+    _initialPriority: 'Very High',
+    _priority: 'Very High',
+    pageref: page.id,
+    request: req,
+    time: 0
+  };
+  populateEntryFromResponse(entry, responseParams, options);
+  return entry;
+}
