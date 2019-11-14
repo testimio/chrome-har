@@ -195,10 +195,11 @@ module.exports = {
             addFromFirstRequest(page, firstRequest);
           } else {
             // try to create a synthetic event.
-            const responseParams = messages.slice(0, 10)
+            const responseInfo = messages.slice(0, 10)
               .find(x => x.method === 'Network.responseReceived' && x.params.requestId === params.frame.loaderId);
 
-            if (responseParams) {
+            if (responseInfo) {
+              const responseParams = responseInfo.params;
               addFromFirstResponse(page, responseParams, options.wallTimeHelper);
               const entry = createSyntheticEvent(page, params, responseParams);
               attachCustomProps(entry, responseParams, options.includeCustomProperties);
