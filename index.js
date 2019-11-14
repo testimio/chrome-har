@@ -196,7 +196,7 @@ module.exports = {
           } else {
             // try to create a synthetic event.
             const responseParams = messages.slice(0, 10)
-              .find(x => x.method === 'Network.responseReceived' && x.requestId === params.frame.loaderId);
+              .find(x => x.method === 'Network.responseReceived' && x.params.requestId === params.frame.loaderId);
 
             if (responseParams) {
               addFromFirstResponse(page, responseParams, options.wallTimeHelper);
