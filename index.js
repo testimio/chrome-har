@@ -740,6 +740,6 @@ function createSyntheticEvent(page, params, responseParams, options) {
     request: req,
     time: 0
   };
-  populateEntryFromResponse(entry, responseParams, options);
+  populateEntryFromResponse(entry, responseParams.response, options);
   return entry;
 }
