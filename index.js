@@ -60,9 +60,8 @@ function addFromFirstResponse(page, params, wallTimeHelper) {
   const wallTime = wallTimeHelper.getWallTimeFromTimestamp(response.timing.requestTime);
   if (wallTime) {
     page.__wallTime = wallTime;
+    page.startedDateTime = dayjs.unix(wallTime).toISOString(); //epoch float64, eg 1440589909.59248
   }
-
-  page.startedDateTime = dayjs.unix(wallTime).toISOString(); //epoch float64, eg 1440589909.59248
   // URL is better than blank, and it's what devtools uses.
   page.title = response.url;
 
@@ -728,8 +727,8 @@ function createSyntheticEvent(page, params, responseParams, options) {
 
   const entry = {
     cache: {},
-    startedDateTime: page.startedDateTime ? dayjs.unix(page.startedDateTime).toISOString() : '',
-    __requestWillBeSentTime: params.timestamp,
+    startedDateTime: page.startedDateTime ? page.startedDateTime : '',
+    __requestWillBeSentTime: responseParams.response.timing.requestTime,
     __wallTime: page.__wallTime,
     _requestId: responseParams.requestId,
     __frameId: responseParams.frameId,
