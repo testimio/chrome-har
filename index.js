@@ -1,9 +1,8 @@
 'use strict';
-const { name } = require('./package');
 const urlParser = require('url');
 const uuid = require('uuid/v1');
 const dayjs = require('dayjs');
-const debug = require('debug')(name);
+const debug = require('debug')('chrome-har');
 const ignoredEvents = require('./lib/ignoredEvents');
 const { parseRequestCookies } = require('./lib/cookies');
 const { getHeaderValue, parseHeaders } = require('./lib/headers');
@@ -12,8 +11,14 @@ const {
   formatMillis,
   parsePostData,
   isSupportedProtocol,
-  toNameValuePairs
+  toNameValuePairs,
+  blockedResponse,
+  blockedTimings
 } = require('./lib/util');
+const {
+  createSyntheticEventFromFrameNavigated,
+  createSyntheticEventFromResponse
+} = require('./lib/syntheticEventsCreator')
 const populateEntryFromResponse = require('./lib/entryFromResponse');
 
 const defaultOptions = {
@@ -71,45 +76,14 @@ function addFromFirstResponse(page, params, wallTimeHelper) {
 }
 
 
-function attachCustomProps(entry, params, shouldInclude) {
-  if (shouldInclude) {
-    const custom = params['_custom'];
-    if (custom) {
-      entry._testim = Object.assign(entry._testim || {}, custom);
-    }
+function attachCustomProps(entry, params, ) {
+  const custom = params['_custom'];
+  if (custom) {
+    entry._testim = Object.assign(entry._testim || {}, custom);
   }
 }
 
-function blockedResponse() {
-  return {
-    "status": 0,
-    "statusText": "",
-    "httpVersion": "",
-    "headers": [],
-    "cookies": [],
-    "content": {
-      "size": 0,
-      "mimeType": "x-unknown"
-    },
-    "redirectURL": "",
-    "headersSize": -1,
-    "bodySize": -1,
-    "_transferSize": 0
-  }
-}
 
-function blockedTimings() {
-  return {
-    blocked: -1,
-    connect: -1,
-    dns: -1,
-    receive: -1,
-    send: -1,
-    ssl: -1,
-    wait: -1,
-    _queued: -1
-  }
-}
 
 module.exports = {
   harFromMessages(messages, options) {
@@ -194,6 +168,10 @@ module.exports = {
             addFromFirstRequest(page, firstRequest);
           } else {
             // try to create a synthetic event.
+            // this use-case usually happens when the debugger
+            // is attached after the page request was sent, but before
+            // the response was received. We assume that
+            // the page is request is one of the first 10 messages.
             const responseInfo = messages.slice(0, 10)
               .find(x => x.method === 'Network.responseReceived' && x.params.requestId === params.frame.loaderId);
 
@@ -201,7 +179,9 @@ module.exports = {
               const responseParams = responseInfo.params;
               addFromFirstResponse(page, responseParams, options.wallTimeHelper);
               const entry = createSyntheticEventFromResponse(page, responseParams);
-              attachCustomProps(entry, responseParams, options.includeCustomProperties);
+              if (options.includeCustomProperties) {
+                attachCustomProps(entry, responseParams);
+              }
               entries.push(entry);
             } else {
               // totally without a request, do something.
@@ -210,9 +190,7 @@ module.exports = {
             }
           }
           pages.push(page);
-          if (pages.length === 1) {
-            attachPagelessRequests(page);
-          }
+          attachPagelessRequests(page);
           continue;
         }
         case 'Page.navigatedWithinDocument':
@@ -234,9 +212,7 @@ module.exports = {
               __frameId: rootFrame
             };
             pages.push(page);
-            if (pages.length === 1) {
-              attachPagelessRequests(page);
-            }
+            attachPagelessRequests(page);
           }
           break;
 
@@ -295,9 +271,9 @@ module.exports = {
               _initiator: params.initiator,
               _initiator_type: params.initiator.type
             };
-
-            attachCustomProps(entry, params, options.includeCustomProperties);
-
+            if (options.includeCustomProperties) {
+              attachCustomProps(entry, params);
+            }
             // The object initiator change according to its type
             switch (params.initiator.type) {
               case 'parser':
@@ -425,8 +401,11 @@ module.exports = {
                 } with no matching request.`
               );
               continue;
+
             }
-            attachCustomProps(entry, params, options.includeCustomProperties);
+            if (options.includeCustomProperties) {
+              attachCustomProps(entry, params);
+            }
             const frameId =
               rootFrameMappings.get(params.frameId) || params.frameId;
             const page = pages.find(page => page.__frameId === frameId);
@@ -506,19 +485,17 @@ module.exports = {
               );
               continue;
             }
-            attachCustomProps(entry, params, options.includeCustomProperties);
+            if (options.includeCustomProperties) {
+              attachCustomProps(entry, params);
+            }
             const timings = entry.timings || {};
             timings.receive = formatMillis(
               (params.timestamp - entry._requestTime) * 1000 -
               entry.__receiveHeadersEnd
             );
-            entry.time =
-              Math.floor(1000 * max(0, timings.blocked) +
-                max(0, timings.dns) +
-                max(0, timings.connect) +
-                max(0, timings.send) +
-                max(0, timings.wait) +
-                max(0, timings.receive)) / 1000;
+            const fullTime = max(0, timings.blocked) + max(0, timings.dns) + max(0, timings.connect) +
+              max(0, timings.send) + max(0, timings.wait) + max(0, timings.receive);
+            entry.time = Math.floor(1000 * fullTime) / 1000;
 
             // For cached entries, Network.loadingFinished can have an earlier
             // timestamp than Network.dataReceived
@@ -617,7 +594,9 @@ module.exports = {
               continue;
             }
 
-            attachCustomProps(entry, params, options.includeCustomProperties);
+            if (options.includeCustomProperties) {
+              attachCustomProps(entry, params);
+            }
             entry._transferSize = 0;
             entry.request.httpVersion = entry.request.httpVersion || "";
             entry.response = Object.assign(entry.response || blockedResponse(), { _error: params.errorText });
@@ -715,64 +694,3 @@ module.exports = {
   }
 };
 
-
-function createSyntheticEventFromResponse(page, responseParams) {
-  const url = urlParser.parse(responseParams.response.url, true);
-  const req = {
-    method: "GET",
-    url: urlParser.format(responseParams.response.url),
-    queryString: toNameValuePairs(url.query),
-    postData: undefined,
-    headersSize: -1,
-    bodySize: 0,
-    cookies: [],
-    headers: []
-  };
-
-  const entry = {
-    cache: {},
-    startedDateTime: page.startedDateTime ? page.startedDateTime : '',
-    __requestWillBeSentTime: responseParams.response.timing.requestTime,
-    __wallTime: page.__wallTime,
-    _requestId: responseParams.requestId,
-    __frameId: responseParams.frameId,
-    _initialPriority: 'Very High',
-    _priority: 'Very High',
-    pageref: page.id,
-    request: req,
-    time: 0
-  };
-
-  return entry;
-}
-
-function createSyntheticEventFromFrameNavigated(page, frameParams) {
-  const { frame } = frameParams;
-  const url = urlParser.parse(frame.url, true);
-  const req = {
-    method: "GET",
-    url: urlParser.format(frame.url),
-    queryString: toNameValuePairs(url.query),
-    postData: undefined,
-    headersSize: -1,
-    bodySize: 0,
-    cookies: [],
-    headers: []
-  };
-
-  const entry = {
-    cache: {},
-    startedDateTime: page.startedDateTime ? page.startedDateTime : '',
-    __requestWillBeSentTime: undefined,
-    __wallTime: undefined,
-    _requestId: frame.loaderId,
-    __frameId: frame.id,
-    _initialPriority: 'Very High',
-    _priority: 'Very High',
-    pageref: page.id,
-    request: req,
-    time: 0
-  };
-
-  return entry;
-}
