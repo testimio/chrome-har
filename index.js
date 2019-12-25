@@ -489,8 +489,9 @@ module.exports = {
               attachCustomProps(entry, params);
             }
             const timings = entry.timings || {};
+            const startTime = entry.__requestWillBeSentTime || entry._requestTime;
             timings.receive = formatMillis(
-              (params.timestamp - entry._requestTime) * 1000 -
+              (params.timestamp - startTime) * 1000 -
               entry.__receiveHeadersEnd
             );
             const fullTime = max(0, timings.blocked) + max(0, timings.dns) + max(0, timings.connect) +
