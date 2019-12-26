@@ -13,7 +13,8 @@ const {
   isSupportedProtocol,
   toNameValuePairs,
   blockedResponse,
-  blockedTimings
+  blockedTimings,
+  cachedTimings
 } = require('./lib/util');
 const {
   createSyntheticEventFromFrameNavigated,
@@ -109,6 +110,8 @@ module.exports = {
         }
         entries = entries.concat(entriesWithoutPage);
         addFromFirstRequest(page, paramsWithoutPage[0]);
+        entriesWithoutPage = [];
+        paramsWithoutPage = [];
       }
       if (responsesWithoutPage.length > 0) {
         for (let params of responsesWithoutPage) {
@@ -125,6 +128,7 @@ module.exports = {
             debug(`Couldn't find matching request for response`);
           }
         }
+        responsesWithoutPage = [];
       }
     }
 
@@ -490,16 +494,18 @@ module.exports = {
             if (options.includeCustomProperties) {
               attachCustomProps(entry, params);
             }
-            const timings = entry.timings || {};
-            const startTime = entry.__requestWillBeSentTime || entry._requestTime;
-            timings.receive = formatMillis(
-              (params.timestamp - startTime) * 1000 -
-              entry.__receiveHeadersEnd
-            );
-            const fullTime = max(0, timings.blocked) + max(0, timings.dns) + max(0, timings.connect) +
-              max(0, timings.send) + max(0, timings.wait) + max(0, timings.receive);
-            entry.time = Math.floor(1000 * fullTime) / 1000;
-
+            
+            if(entry._fromCache === 'memory') {
+                entry.time = 0;
+                entry.timings = cachedTimings(entry.__requestWillBeSentTime,params.timestamp);
+            } else {
+                const timings = entry.timings || {};
+                const startTime = entry.__requestWillBeSentTime || entry._requestTime;
+                timings.receive = formatMillis((params.timestamp - startTime) * 1000 -entry.__receiveHeadersEnd);
+                const fullTime = max(0, timings.blocked) + max(0, timings.dns) + max(0, timings.connect) +
+                max(0, timings.send) + max(0, timings.wait) + max(0, timings.receive);
+                entry.time = Math.floor(1000 * fullTime) / 1000;
+            }
             // For cached entries, Network.loadingFinished can have an earlier
             // timestamp than Network.dataReceived
 
