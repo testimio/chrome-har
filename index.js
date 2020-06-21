@@ -28,7 +28,7 @@ const defaultOptions = {
   includeCustomProperties: false,
   name: 'Testim',
   version: '1.0',
-  comment: 'Created during a text executed by Testim.',
+  comment: 'Created during a test executed by Testim.',
   meta: undefined,
   wallTimeHelper: {
     getWallTimeFromTimestamp(timestamp) {
@@ -89,10 +89,11 @@ function attachCustomProps(entry, params, ) {
 module.exports = {
   harFromMessages(messages, options) {
     options = Object.assign({}, defaultOptions, options);
-
     const ignoredRequests = new Set(),
       rootFrameMappings = new Map(),
-      loaders = new Map();
+      loaders = new Map(),
+      responseExtraInfo = new Map(),
+      requestExtraInfo = new Map();
 
     let pages = [],
       entries = [],
@@ -178,7 +179,7 @@ module.exports = {
             // the page is request is one of the first 10 messages.
             const responseInfo = messages.slice(0, 10)
               .find(x => x.method === 'Network.responseReceived' && x.params.requestId === params.frame.loaderId);
-
+            
             if (responseInfo) {
               const responseParams = responseInfo.params;
               addFromFirstResponse(page, responseParams, options.wallTimeHelper);
@@ -259,6 +260,10 @@ module.exports = {
               cookies: parseRequestCookies(cookieHeader),
               headers: parseHeaders(request.headers)
             };
+
+            if(requestExtraInfo.has(request.requestId)) {
+                req.headers = requestExtraInfo.get(request.requestId).headers;
+            }
 
             const entry = {
               cache: {},
@@ -424,6 +429,9 @@ module.exports = {
 
             try {
               populateEntryFromResponse(entry, params.response, options);
+              if (responseExtraInfo.has(params.requestId)) {
+                entry.response.headers = parseHeaders(responseExtraInfo.get(params.requestId).headers);
+              }
             } catch (e) {
               debug(
                 `Error parsing response: ${JSON.stringify(
@@ -631,6 +639,46 @@ module.exports = {
             entry._priority = message.params.newPriority;
           }
           break;
+
+          case 'Network.responseReceivedExtraInfo':
+            {
+              const entry = entries.find(
+                entry => entry._requestId === params.requestId
+              );
+                
+              if (!entry) {
+                debug(
+                  `Received responseReceivedExtraInfo for requestId ${
+                  params.requestId
+                  } with no matching request.`
+                );
+                responseExtraInfo.set(params.requestId,params);
+                continue;
+              }
+              entry.response.headers = parseHeaders(params.headers)
+              responseExtraInfo.set(params.requestId,params);
+            }
+            break;
+
+            case 'Network.requestWillBeSentExtraInfo':
+                {
+                  const entry = entries.find(
+                    entry => entry._requestId === params.requestId
+                  );
+      
+                  if (!entry) {
+                    debug(
+                      `Received requestWillBeSentExtraInfo for requestId ${
+                      params.requestId
+                      } with no matching request.`
+                    );
+                    requestExtraInfo.set(params.requestId,params);
+                    continue;
+                  }
+      
+                  entry.request.headers = parseHeaders(params.headers);
+                }
+                break;
 
         default:
           // Keep the old functionallity and log unknown events
