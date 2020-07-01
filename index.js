@@ -657,7 +657,7 @@ module.exports = {
                 responseExtraInfo.set(params.requestId,params);
                 continue;
               }
-              entry.response.headers = parseHeaders(params.headers)
+              entry.response.headers = parseHeaders(params.headers);
               responseExtraInfo.set(params.requestId,params);
             }
             break;
