@@ -234,7 +234,9 @@ module.exports = {
             if (params.loaderId === '' && params.request.method === 'OPTIONS' && params.initiator.type === 'other') {                
                 // hueristically, look in the last 10 calls in reverse order (i.e. prefer the latest).
                 const latest = messages.slice(currentPosition - 10, currentPosition).reverse();
-                const initiator = latest.find(x=> x.method === 'Network.requestWillBeSent' && x.params.request.url === params.documentURL);
+                const initiator = latest.find(x=> x.method === 'Network.requestWillBeSent' 
+                                                    && x.params.request.method !== 'OPTIONS' 
+                                                    && x.params.request.url === params.documentURL);
                 if (initiator) {
                     params.loaderId = initiator.params.loaderId;
                     params.frameId = initiator.params.frameId;
