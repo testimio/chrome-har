@@ -292,6 +292,9 @@ module.exports = {
               _initiator: params.initiator,
               _initiator_type: params.initiator.type
             };
+            if(typeof params.type === 'string') {
+              entry._resourceType = params.type.toLowerCase();
+            }
             if (options.includeCustomProperties) {
               attachCustomProps(entry, params);
             }
