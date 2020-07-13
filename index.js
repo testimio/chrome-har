@@ -132,11 +132,11 @@ module.exports = {
         responsesWithoutPage = [];
       }
     }
-
-    for (const message of messages) {
+    
+    for (let currentPosition = 0; currentPosition < messages.length; currentPosition++) {
+      const message = messages[currentPosition];  
       const params = message.params;
-
-      const method = message.method;
+      const method = message.method;      
 
       if (!/^(Page|Network)\..+/.test(method)) {
         continue;
@@ -231,8 +231,7 @@ module.exports = {
 
             // OPTIONS calls have their own loader/initiator. However, this was created by a previous request
             // try to find that request in the 10 previous events
-            if (params.loaderId === '' && params.request.method === 'OPTIONS' && params.initiator.type === 'other') {
-                const currentPosition = messages.indexOf(message);
+            if (params.loaderId === '' && params.request.method === 'OPTIONS' && params.initiator.type === 'other') {                
                 // hueristically, look in the last 10 calls in reverse order (i.e. prefer the latest).
                 const latest = messages.slice(currentPosition - 10, currentPosition).reverse();
                 const initiator = latest.find(x=> x.method === 'Network.requestWillBeSent' && x.params.request.url === params.documentURL);
