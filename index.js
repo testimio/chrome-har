@@ -92,7 +92,8 @@ module.exports = {
 
     const ignoredRequests = new Set(),
       rootFrameMappings = new Map(),
-      loaders = new Map();
+      loaders = new Map(),
+      recognizedOptionsCalls = new Map();
 
     let pages = [],
       entries = [],
@@ -227,9 +228,25 @@ module.exports = {
               ignoredRequests.add(params.requestId);
               continue;
             }
-            // set this request as the loader for the page.
-            if (!loaders.has(params.loaderId)) {
-              loaders.set(params.loaderId, params);
+
+            // OPTIONS calls have their own loader/initiator. However, this was created by a previous request
+            // try to find that request in the 10 previous events
+            if (params.loaderId === '' && params.request.method === 'OPTIONS' && params.initiator.type === 'other') {
+                const currentPosition = messages.indexOf(message);
+                // hueristically, look in the last 10 calls in reverse order (i.e. prefer the latest).
+                const latest = messages.slice(currentPosition - 10, currentPosition).reverse();
+                const initiator = latest.find(x=> x.method === 'Network.requestWillBeSent' && x.params.request.url === params.documentURL);
+                if (initiator) {
+                    params.loaderId = initiator.params.loaderId;
+                    params.frameId = initiator.params.frameId;
+                    // save for next events
+                    recognizedOptionsCalls.set(params.requestId, { loaderId: params.loaderId, frameId: params.frameId });
+                }
+            }
+
+            // could not find loader for page
+            if (!loaders.has(params.loaderId)) {            
+                loaders.set(params.loaderId, params);
             }
             const page = pages[pages.length - 1];
             const cookieHeader = getHeaderValue(request.headers, 'Cookie');
@@ -413,7 +430,7 @@ module.exports = {
               attachCustomProps(entry, params);
             }
             const frameId =
-              rootFrameMappings.get(params.frameId) || params.frameId;
+              rootFrameMappings.get(params.frameId) || params.frameId || (recognizedOptionsCalls.get(params.requestId) || {}).frameId;
             const page = pages.find(page => page.__frameId === frameId);
             if (!page) {
               debug(
