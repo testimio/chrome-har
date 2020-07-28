@@ -23,6 +23,7 @@
   },
   "license": "MIT",
   "devDependencies": {
+    "@types/har-format": "^1.2.4",
     "ava": "~0.25.0",
     "bluebird": "~3.5.1",
     "devtools-protocol": "0.0.792050",
