@@ -2,6 +2,8 @@ import {
     DevtoolsProtocolEventMap,
 } from './nicerChromeDevToolsTypes';
 
+import type { Har } from 'har-format';
+
 // Possible events, from the switch case inside chrome-har code
 // We can expand if to all kind of events easily
 declare const possibleEvents: [
@@ -26,7 +28,7 @@ export type ChromeHarMessage = DevtoolsProtocolEventMap[typeof possibleEvents[nu
 
 export type HarFromMessages = (
     messages: ChromeHarMessage[],
-    options: { includeResourcesFromDiskCache?: boolean; includeTextFromResponseBody?: boolean }
-) => void;
+    options: { includeResourcesFromDiskCache?: boolean; includeTextFromResponseBody?: boolean; name?: string; version?: string; comment?: string }
+) => Har;
 
 export declare const harFromMessages: HarFromMessages;
