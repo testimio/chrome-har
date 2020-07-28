@@ -25,6 +25,7 @@
   "devDependencies": {
     "ava": "~0.25.0",
     "bluebird": "~3.5.1",
+    "devtools-protocol": "0.0.792050",
     "eslint": "~4.18.2",
     "eslint-config-prettier": "~2.9.0",
     "eslint-plugin-prettier": "~2.6.0",
