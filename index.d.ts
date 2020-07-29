@@ -7,6 +7,7 @@ import type { Har } from 'har-format';
 // Possible events, from the switch case inside chrome-har code
 // We can expand if to all kind of events easily
 declare const possibleEvents: [
+    'Page.frameNavigated',
     'Network.dataReceived',
     'Network.loadingFailed',
     'Network.loadingFinished',
