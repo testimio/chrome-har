@@ -262,7 +262,7 @@ module.exports = {
             };
 
             if(requestExtraInfo.has(request.requestId)) {
-                req.headers = requestExtraInfo.get(request.requestId).headers;
+                req.headers = parseHeaders(requestExtraInfo.get(request.requestId).headers);
             }
 
             const entry = {
@@ -679,7 +679,7 @@ module.exports = {
                     continue;
                   }
                   if(entry.request) {
-                    entry.request.headers = parseHeaders(params.headers);
+                      entry.request.headers = parseHeaders(params.headers);
                   }
                 }
                 break;
