@@ -647,18 +647,19 @@ module.exports = {
               const entry = entries.find(
                 entry => entry._requestId === params.requestId
               );
-                
+              
+              responseExtraInfo.set(params.requestId,params);
               if (!entry) {
                 debug(
                   `Received responseReceivedExtraInfo for requestId ${
                   params.requestId
                   } with no matching request.`
                 );
-                responseExtraInfo.set(params.requestId,params);
                 continue;
               }
-              entry.response.headers = parseHeaders(params.headers);
-              responseExtraInfo.set(params.requestId,params);
+              if(entry.response) {
+                entry.response.headers = parseHeaders(params.headers);
+              }
             }
             break;
 
@@ -668,17 +669,18 @@ module.exports = {
                     entry => entry._requestId === params.requestId
                   );
       
+                  requestExtraInfo.set(params.requestId,params);
                   if (!entry) {
                     debug(
                       `Received requestWillBeSentExtraInfo for requestId ${
                       params.requestId
                       } with no matching request.`
                     );
-                    requestExtraInfo.set(params.requestId,params);
                     continue;
                   }
-      
-                  entry.request.headers = parseHeaders(params.headers);
+                  if(entry.request) {
+                    entry.request.headers = parseHeaders(params.headers);
+                  }
                 }
                 break;
 
