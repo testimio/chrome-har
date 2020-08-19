@@ -4,7 +4,7 @@ const uuid = require('uuid/v1');
 const dayjs = require('dayjs');
 const debug = require('debug')('chrome-har');
 const ignoredEvents = require('./lib/ignoredEvents');
-const { parseRequestCookies } = require('./lib/cookies');
+const { parseRequestCookies, parseResponseCookies, formatCookie } = require('./lib/cookies');
 const { getHeaderValue, parseHeaders } = require('./lib/headers');
 const {
   isHttp1x,
@@ -77,7 +77,7 @@ function addFromFirstResponse(page, params, wallTimeHelper) {
 }
 
 
-function attachCustomProps(entry, params, ) {
+function attachCustomProps(entry, params,) {
   const custom = params['_custom'];
   if (custom) {
     entry._testim = Object.assign(entry._testim || {}, custom);
@@ -179,7 +179,7 @@ module.exports = {
             // the page is request is one of the first 10 messages.
             const responseInfo = messages.slice(0, 10)
               .find(x => x.method === 'Network.responseReceived' && x.params.requestId === params.frame.loaderId);
-            
+
             if (responseInfo) {
               const responseParams = responseInfo.params;
               addFromFirstResponse(page, responseParams, options.wallTimeHelper);
@@ -261,8 +261,8 @@ module.exports = {
               headers: parseHeaders(request.headers)
             };
 
-            if(requestExtraInfo.has(request.requestId)) {
-                req.headers = parseHeaders(requestExtraInfo.get(request.requestId).headers);
+            if (requestExtraInfo.has(request.requestId)) {
+              addRequestExtraInfo(request, requestExtraInfo.get(request.requestId).headers);
             }
 
             const entry = {
@@ -432,7 +432,7 @@ module.exports = {
             try {
               populateEntryFromResponse(entry, params.response, options);
               if (responseExtraInfo.has(params.requestId)) {
-                entry.response.headers = parseHeaders(responseExtraInfo.get(params.requestId).headers);
+                addResponseExtraInfo(entry.response, responseExtraInfo.get(params.requestId));
               }
             } catch (e) {
               debug(
@@ -502,17 +502,17 @@ module.exports = {
             if (options.includeCustomProperties) {
               attachCustomProps(entry, params);
             }
-            
-            if(entry._fromCache === 'memory') {
-                entry.time = 0;
-                entry.timings = cachedTimings(entry.__requestWillBeSentTime,params.timestamp);
+
+            if (entry._fromCache === 'memory') {
+              entry.time = 0;
+              entry.timings = cachedTimings(entry.__requestWillBeSentTime, params.timestamp);
             } else {
-                const timings = entry.timings || {};
-                const startTime = entry.__requestWillBeSentTime || entry._requestTime;
-                timings.receive = formatMillis((params.timestamp - startTime) * 1000 -entry.__receiveHeadersEnd);
-                const fullTime = max(0, timings.blocked) + max(0, timings.dns) + max(0, timings.connect) +
+              const timings = entry.timings || {};
+              const startTime = entry.__requestWillBeSentTime || entry._requestTime;
+              timings.receive = formatMillis((params.timestamp - startTime) * 1000 - entry.__receiveHeadersEnd);
+              const fullTime = max(0, timings.blocked) + max(0, timings.dns) + max(0, timings.connect) +
                 max(0, timings.send) + max(0, timings.wait) + max(0, timings.receive);
-                entry.time = Math.floor(1000 * fullTime) / 1000;
+              entry.time = Math.floor(1000 * fullTime) / 1000;
             }
             // For cached entries, Network.loadingFinished can have an earlier
             // timestamp than Network.dataReceived
@@ -642,47 +642,47 @@ module.exports = {
           }
           break;
 
-          case 'Network.responseReceivedExtraInfo':
-            {
-              const entry = entries.find(
-                entry => entry._requestId === params.requestId
-              );
-              
-              responseExtraInfo.set(params.requestId,params);
-              if (!entry) {
-                debug(
-                  `Received responseReceivedExtraInfo for requestId ${
-                  params.requestId
-                  } with no matching request.`
-                );
-                continue;
-              }
-              if(entry.response) {
-                entry.response.headers = parseHeaders(params.headers);
-              }
-            }
-            break;
+        case 'Network.responseReceivedExtraInfo':
+          {
+            const entry = entries.find(
+              entry => entry._requestId === params.requestId
+            );
 
-            case 'Network.requestWillBeSentExtraInfo':
-                {
-                  const entry = entries.find(
-                    entry => entry._requestId === params.requestId
-                  );
-      
-                  requestExtraInfo.set(params.requestId,params);
-                  if (!entry) {
-                    debug(
-                      `Received requestWillBeSentExtraInfo for requestId ${
-                      params.requestId
-                      } with no matching request.`
-                    );
-                    continue;
-                  }
-                  if(entry.request) {
-                      entry.request.headers = parseHeaders(params.headers);
-                  }
-                }
-                break;
+            responseExtraInfo.set(params.requestId, params);
+            if (!entry) {
+              debug(
+                `Received responseReceivedExtraInfo for requestId ${
+                params.requestId
+                } with no matching request.`
+              );
+              continue;
+            }
+            if (entry.response) {
+              addResponseExtraInfo(entry.response, params);
+            }
+          }
+          break;
+
+        case 'Network.requestWillBeSentExtraInfo':
+          {
+            const entry = entries.find(
+              entry => entry._requestId === params.requestId
+            );
+
+            requestExtraInfo.set(params.requestId, params);
+            if (!entry) {
+              debug(
+                `Received requestWillBeSentExtraInfo for requestId ${
+                params.requestId
+                } with no matching request.`
+              );
+              continue;
+            }
+            if (entry.request) {
+              addRequestExtraInfo(entry, params);
+            }
+          }
+          break;
 
         default:
           // Keep the old functionallity and log unknown events
@@ -753,3 +753,45 @@ module.exports = {
   }
 };
 
+function addRequestExtraInfo(request, requestExtraInfo) {
+  if (requestExtraInfo.headers) {
+    request.headers = parseHeaders(requestExtraInfo.headers);
+  }
+  if (requestExtraInfo.associatedCookies) {
+    try {
+      request.cookies = requestExtraInfo.associatedCookies
+        .filter(({ blockedReasons }) => !blockedReasons.length)
+        .map(({ cookie }) => formatCookie(cookie));
+    } catch(err) {
+      // better safe than sorry.
+    }
+  }
+}
+
+function addResponseExtraInfo(response, responseExtraInfo) {
+  if (responseExtraInfo.headers) {
+    response.headers = parseHeaders(responseExtraInfo.headers);
+  }
+  if (responseExtraInfo.blockedCookies) {
+    try {
+      response.cookies = response.cookies.filter(
+        ({ name }) => !responseExtraInfo.blockedCookies.find(blockedCookie => {
+          if (blockedCookie.cookie) {
+            return blockedCookie.cookie.name === name;
+          }
+
+          if (blockedCookie.cookieLine) {
+            const cookie = parseResponseCookies(blockedCookie.cookieLine)[0];
+            if (cookie) {
+              return cookie.name === name;
+            }
+          }
+
+          return false;
+        })
+      );
+    } catch (err) {
+      // better safe than sorry
+    }
+  }
+}
