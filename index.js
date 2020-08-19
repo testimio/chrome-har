@@ -295,6 +295,7 @@ module.exports = {
               pageref: currentPageId,
               request: req,
               time: 0,
+              _initiator: params.initiator,
               _initiator_detail: JSON.stringify(params.initiator),
               _initiator_type: params.initiator.type
             };
