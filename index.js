@@ -93,7 +93,8 @@ module.exports = {
       rootFrameMappings = new Map(),
       loaders = new Map(),
       responseExtraInfo = new Map(),
-      requestExtraInfo = new Map();
+      requestExtraInfo = new Map(),
+      recognizedOptionsCalls = new Map();
 
     let pages = [],
       entries = [],
@@ -132,11 +133,11 @@ module.exports = {
         responsesWithoutPage = [];
       }
     }
-
-    for (const message of messages) {
+    
+    for (let currentPosition = 0; currentPosition < messages.length; currentPosition++) {
+      const message = messages[currentPosition];  
       const params = message.params;
-
-      const method = message.method;
+      const method = message.method;      
 
       if (!/^(Page|Network)\..+/.test(method)) {
         continue;
@@ -228,9 +229,26 @@ module.exports = {
               ignoredRequests.add(params.requestId);
               continue;
             }
-            // set this request as the loader for the page.
-            if (!loaders.has(params.loaderId)) {
-              loaders.set(params.loaderId, params);
+
+            // OPTIONS calls have their own loader/initiator. However, this was created by a previous request
+            // try to find that request in the 10 previous events
+            if (params.loaderId === '' && params.request.method === 'OPTIONS' && params.initiator.type === 'other') {                
+                // hueristically, look in the last 10 calls in reverse order (i.e. prefer the latest).
+                const latest = messages.slice(currentPosition - 50, currentPosition).reverse();
+                const initiator = latest.find(x=> x.method === 'Network.requestWillBeSent' 
+                                                    && x.params.request.method !== 'OPTIONS' 
+                                                    && x.params.request.url === params.documentURL);
+                if (initiator) {
+                    params.loaderId = initiator.params.loaderId;
+                    params.frameId = initiator.params.frameId;
+                    // save for next events
+                    recognizedOptionsCalls.set(params.requestId, { loaderId: params.loaderId, frameId: params.frameId });
+                }
+            }
+
+            // could not find loader for page
+            if (!loaders.has(params.loaderId)) {            
+                loaders.set(params.loaderId, params);
             }
             const page = pages[pages.length - 1];
             const cookieHeader = getHeaderValue(request.headers, 'Cookie');
@@ -280,6 +298,9 @@ module.exports = {
               _initiator_detail: JSON.stringify(params.initiator),
               _initiator_type: params.initiator.type
             };
+            if(typeof params.type === 'string') {
+              entry._resourceType = params.type.toLowerCase();
+            }
             if (options.includeCustomProperties) {
               attachCustomProps(entry, params);
             }
@@ -418,7 +439,7 @@ module.exports = {
               attachCustomProps(entry, params);
             }
             const frameId =
-              rootFrameMappings.get(params.frameId) || params.frameId;
+              rootFrameMappings.get(params.frameId) || params.frameId || (recognizedOptionsCalls.get(params.requestId) || {}).frameId;
             const page = pages.find(page => page.__frameId === frameId);
             if (!page) {
               debug(
