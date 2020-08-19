@@ -1,11 +1,8 @@
 'use strict';
-
-const { name, version, homepage } = require('./package');
-
 const urlParser = require('url');
 const uuid = require('uuid/v1');
 const dayjs = require('dayjs');
-const debug = require('debug')(name);
+const debug = require('debug')('chrome-har');
 const ignoredEvents = require('./lib/ignoredEvents');
 const { parseRequestCookies } = require('./lib/cookies');
 const { getHeaderValue, parseHeaders } = require('./lib/headers');
@@ -14,13 +11,33 @@ const {
   formatMillis,
   parsePostData,
   isSupportedProtocol,
-  toNameValuePairs
+  toNameValuePairs,
+  blockedResponse,
+  blockedTimings,
+  cachedTimings
 } = require('./lib/util');
+const {
+  createSyntheticEventFromFrameNavigated,
+  createSyntheticEventFromResponse
+} = require('./lib/syntheticEventsCreator')
 const populateEntryFromResponse = require('./lib/entryFromResponse');
 
 const defaultOptions = {
   includeResourcesFromDiskCache: false,
-  includeTextFromResponseBody: false
+  includeTextFromResponseBody: false,
+  includeCustomProperties: false,
+  name: 'Testim',
+  version: '1.0',
+  comment: 'Created during a text executed by Testim.',
+  meta: undefined,
+  wallTimeHelper: {
+    getWallTimeFromTimestamp(timestamp) {
+      return undefined;
+    },
+    getTimestampFromWallTime(wallTime) {
+      return undefined;
+    }
+  }
 };
 const isEmpty = o => !o;
 
@@ -34,14 +51,49 @@ function addFromFirstRequest(page, params) {
     // URL is better than blank, and it's what devtools uses.
     page.title = page.title === '' ? params.request.url : page.title;
   }
+
+  if (!page.__loaderId && params.loaderId) {
+    page.__loaderId = params.loaderId;
+  }
 }
+
+function addFromFirstResponse(page, params, wallTimeHelper) {
+  const { response, loaderId } = params;
+  if (!page.__timestamp) {
+    page.__timestamp = response.timing.requestTime;
+  }
+
+  const wallTime = wallTimeHelper.getWallTimeFromTimestamp(response.timing.requestTime);
+  if (wallTime) {
+    page.__wallTime = wallTime;
+    page.startedDateTime = dayjs.unix(wallTime).toISOString(); //epoch float64, eg 1440589909.59248
+  }
+  // URL is better than blank, and it's what devtools uses.
+  page.title = response.url;
+
+  if (!page.__loaderId && loaderId) {
+    page.__loaderId = loaderId;
+  }
+}
+
+
+function attachCustomProps(entry, params, ) {
+  const custom = params['_custom'];
+  if (custom) {
+    entry._testim = Object.assign(entry._testim || {}, custom);
+  }
+}
+
+
 
 module.exports = {
   harFromMessages(messages, options) {
     options = Object.assign({}, defaultOptions, options);
 
     const ignoredRequests = new Set(),
-      rootFrameMappings = new Map();
+      rootFrameMappings = new Map(),
+      loaders = new Map(),
+      recognizedOptionsCalls = new Map();
 
     let pages = [],
       entries = [],
@@ -50,18 +102,102 @@ module.exports = {
       paramsWithoutPage = [],
       currentPageId;
 
-    for (const message of messages) {
+    function attachPagelessRequests(page) {
+      // do we have any unmmapped requests, add them
+      if (entriesWithoutPage.length > 0) {
+        // update page
+        for (let entry of entriesWithoutPage) {
+          entry.pageref = page.id;
+        }
+        entries = entries.concat(entriesWithoutPage);
+        addFromFirstRequest(page, paramsWithoutPage[0]);
+        entriesWithoutPage = [];
+        paramsWithoutPage = [];
+      }
+      if (responsesWithoutPage.length > 0) {
+        for (let params of responsesWithoutPage) {
+          let entry = entries.find(
+            entry => entry._requestId === params.requestId
+          );
+          if (entry) {
+            populateEntryFromResponse(
+              entry,
+              params.response,
+              options
+            );
+          } else {
+            debug(`Couldn't find matching request for response`);
+          }
+        }
+        responsesWithoutPage = [];
+      }
+    }
+    
+    for (let currentPosition = 0; currentPosition < messages.length; currentPosition++) {
+      const message = messages[currentPosition];  
       const params = message.params;
-
-      const method = message.method;
+      const method = message.method;      
 
       if (!/^(Page|Network)\..+/.test(method)) {
         continue;
       }
 
       switch (method) {
-        case 'Page.frameStartedLoading':
-        case 'Page.frameScheduledNavigation':
+        case 'Page.frameNavigated': {
+          // not the root
+          if (params.frame.parentId) {
+            continue;
+          }
+
+          // already seen this navigation
+          if (pages.some(page => page.__loaderId === params.frame.loaderId)) {
+            continue;
+          }
+
+          const prevRoot = pages.find(page => page.__frameId === undefined);
+          if (prevRoot && prevRoot.loaderId) {
+            prevRoot.__frameId = "removed";
+          }
+
+          currentPageId = uuid();
+          const page = {
+            id: currentPageId,
+            startedDateTime: '',
+            title: params.frame.url,
+            pageTimings: {},
+            __loaderId: params.frame.loaderId,
+            __frameId: params.frame.id,
+          };
+          const firstRequest = loaders.get(params.frame.loaderId);
+          if (firstRequest) {
+            addFromFirstRequest(page, firstRequest);
+          } else {
+            // try to create a synthetic event.
+            // this use-case usually happens when the debugger
+            // is attached after the page request was sent, but before
+            // the response was received. We assume that
+            // the page is request is one of the first 10 messages.
+            const responseInfo = messages.slice(0, 10)
+              .find(x => x.method === 'Network.responseReceived' && x.params.requestId === params.frame.loaderId);
+
+            if (responseInfo) {
+              const responseParams = responseInfo.params;
+              addFromFirstResponse(page, responseParams, options.wallTimeHelper);
+              const entry = createSyntheticEventFromResponse(page, responseParams);
+              if (options.includeCustomProperties) {
+                attachCustomProps(entry, responseParams);
+              }
+              entries.push(entry);
+            } else {
+              // totally without a request, do something.
+              const entry = createSyntheticEventFromFrameNavigated(page, params)
+              entries.push(entry);
+            }
+          }
+          pages.push(page);
+          attachPagelessRequests(page);
+          continue;
+        }
         case 'Page.navigatedWithinDocument':
           {
             const frameId = params.frameId;
@@ -69,6 +205,7 @@ module.exports = {
             if (pages.some(page => page.__frameId === rootFrame)) {
               continue;
             }
+
             currentPageId = uuid();
             const title =
               method === 'Page.navigatedWithinDocument' ? params.url : '';
@@ -80,32 +217,7 @@ module.exports = {
               __frameId: rootFrame
             };
             pages.push(page);
-            // do we have any unmmapped requests, add them
-            if (entriesWithoutPage.length > 0) {
-              // update page
-              for (let entry of entriesWithoutPage) {
-                entry.pageref = page.id;
-              }
-              entries = entries.concat(entriesWithoutPage);
-              addFromFirstRequest(page, paramsWithoutPage[0]);
-            }
-            if (responsesWithoutPage.length > 0) {
-              for (let params of responsesWithoutPage) {
-                let entry = entries.find(
-                  entry => entry._requestId === params.requestId
-                );
-                if (entry) {
-                  populateEntryFromResponse(
-                    entry,
-                    params.response,
-                    page,
-                    options
-                  );
-                } else {
-                  debug(`Couln't find matching request for response`);
-                }
-              }
-            }
+            attachPagelessRequests(page);
           }
           break;
 
@@ -116,10 +228,31 @@ module.exports = {
               ignoredRequests.add(params.requestId);
               continue;
             }
+
+            // OPTIONS calls have their own loader/initiator. However, this was created by a previous request
+            // try to find that request in the 10 previous events
+            if (params.loaderId === '' && params.request.method === 'OPTIONS' && params.initiator.type === 'other') {                
+                // hueristically, look in the last 10 calls in reverse order (i.e. prefer the latest).
+                const latest = messages.slice(currentPosition - 10, currentPosition).reverse();
+                const initiator = latest.find(x=> x.method === 'Network.requestWillBeSent' 
+                                                    && x.params.request.method !== 'OPTIONS' 
+                                                    && x.params.request.url === params.documentURL);
+                if (initiator) {
+                    params.loaderId = initiator.params.loaderId;
+                    params.frameId = initiator.params.frameId;
+                    // save for next events
+                    recognizedOptionsCalls.set(params.requestId, { loaderId: params.loaderId, frameId: params.frameId });
+                }
+            }
+
+            // could not find loader for page
+            if (!loaders.has(params.loaderId)) {            
+                loaders.set(params.loaderId, params);
+            }
             const page = pages[pages.length - 1];
             const cookieHeader = getHeaderValue(request.headers, 'Cookie');
 
-            //Before we used to remove the hash framgment because of Chrome do that but:
+            //Before we used to remove the hash fragment because of Chrome do that but:
             // 1. Firefox do not
             // 2. If we remove it, the HAR will not have the same URL as we tested
             // and that makes PageXray generate the wromng URL and we end up with two pages
@@ -160,7 +293,12 @@ module.exports = {
               _initiator_detail: JSON.stringify(params.initiator),
               _initiator_type: params.initiator.type
             };
-
+            if(typeof params.type === 'string') {
+              entry._resourceType = params.type.toLowerCase();
+            }
+            if (options.includeCustomProperties) {
+              attachCustomProps(entry, params);
+            }
             // The object initiator change according to its type
             switch (params.initiator.type) {
               case 'parser':
@@ -196,13 +334,12 @@ module.exports = {
                 populateEntryFromResponse(
                   previousEntry,
                   params.redirectResponse,
-                  page,
                   options
                 );
               } else {
                 debug(
                   `Couldn't find original request for redirect response: ${
-                    params.requestId
+                  params.requestId
                   }`
                 );
               }
@@ -211,7 +348,7 @@ module.exports = {
             if (!page) {
               debug(
                 `Request will be sent with requestId ${
-                  params.requestId
+                params.requestId
                 } that can't be mapped to any page at the moment.`
               );
               // ignoredRequests.add(params.requestId);
@@ -226,8 +363,7 @@ module.exports = {
             addFromFirstRequest(page, params);
             // wallTime is not necessarily monotonic, timestamp is. So calculate startedDateTime from timestamp diffs.
             // (see https://cs.chromium.org/chromium/src/third_party/WebKit/Source/platform/network/ResourceLoadTiming.h?q=requestTime+package:%5Echromium$&dr=CSs&l=84)
-            const entrySecs =
-              page.__wallTime + (params.timestamp - page.__timestamp);
+            const entrySecs = page.__wallTime + (params.timestamp - page.__timestamp);
             entry.startedDateTime = dayjs.unix(entrySecs).toISOString();
           }
           break;
@@ -249,7 +385,7 @@ module.exports = {
             if (!entry) {
               debug(
                 `Received requestServedFromCache for requestId ${
-                  params.requestId
+                params.requestId
                 } with no matching request.`
               );
               continue;
@@ -288,26 +424,29 @@ module.exports = {
             if (!entry) {
               debug(
                 `Received network response for requestId ${
-                  params.requestId
+                params.requestId
                 } with no matching request.`
               );
               continue;
-            }
 
+            }
+            if (options.includeCustomProperties) {
+              attachCustomProps(entry, params);
+            }
             const frameId =
-              rootFrameMappings.get(params.frameId) || params.frameId;
+              rootFrameMappings.get(params.frameId) || params.frameId || (recognizedOptionsCalls.get(params.requestId) || {}).frameId;
             const page = pages.find(page => page.__frameId === frameId);
             if (!page) {
               debug(
                 `Received network response for requestId ${
-                  params.requestId
+                params.requestId
                 } that can't be mapped to any page.`
               );
               continue;
             }
 
             try {
-              populateEntryFromResponse(entry, params.response, page, options);
+              populateEntryFromResponse(entry, params.response, options);
             } catch (e) {
               debug(
                 `Error parsing response: ${JSON.stringify(
@@ -337,7 +476,7 @@ module.exports = {
             if (!entry) {
               debug(
                 `Received network data for requestId ${
-                  params.requestId
+                params.requestId
                 } with no matching request.`
               );
               continue;
@@ -368,25 +507,26 @@ module.exports = {
             if (!entry) {
               debug(
                 `Network loading finished for requestId ${
-                  params.requestId
+                params.requestId
                 } with no matching request.`
               );
               continue;
             }
-
-            const timings = entry.timings || {};
-            timings.receive = formatMillis(
-              (params.timestamp - entry._requestTime) * 1000 -
-                entry.__receiveHeadersEnd
-            );
-            entry.time =
-              max(0, timings.blocked) +
-              max(0, timings.dns) +
-              max(0, timings.connect) +
-              max(0, timings.send) +
-              max(0, timings.wait) +
-              max(0, timings.receive);
-
+            if (options.includeCustomProperties) {
+              attachCustomProps(entry, params);
+            }
+            
+            if(entry._fromCache === 'memory') {
+                entry.time = 0;
+                entry.timings = cachedTimings(entry.__requestWillBeSentTime,params.timestamp);
+            } else {
+                const timings = entry.timings || {};
+                const startTime = entry.__requestWillBeSentTime || entry._requestTime;
+                timings.receive = formatMillis((params.timestamp - startTime) * 1000 -entry.__receiveHeadersEnd);
+                const fullTime = max(0, timings.blocked) + max(0, timings.dns) + max(0, timings.connect) +
+                max(0, timings.send) + max(0, timings.wait) + max(0, timings.receive);
+                entry.time = Math.floor(1000 * fullTime) / 1000;
+            }
             // For cached entries, Network.loadingFinished can have an earlier
             // timestamp than Network.dataReceived
 
@@ -478,22 +618,21 @@ module.exports = {
             if (!entry) {
               debug(
                 `Network loading failed for requestId ${
-                  params.requestId
+                params.requestId
                 } with no matching request.`
               );
               continue;
             }
 
-            // This could be due to incorrect domain name etc. Sad, but unfortunately not something that a HAR file can
-            // represent.
-            debug(
-              `Failed to load url '${entry.request.url}' (canceled: ${
-                params.canceled
-              })`
-            );
-            entries = entries.filter(
-              entry => entry._requestId !== params.requestId
-            );
+            if (options.includeCustomProperties) {
+              attachCustomProps(entry, params);
+            }
+            entry._transferSize = 0;
+            entry.request.httpVersion = entry.request.httpVersion || "";
+            entry.response = Object.assign(entry.response || blockedResponse(), { _error: params.errorText });
+            entry.timings = entry.timings || blockedTimings();
+            entry.serverIPAddress = "";
+            entry.comment = `Error: ${params.errorText}${params.blockedReason ? `. Reason: ${params.blockedReason}` : ''}`
           }
           break;
 
@@ -506,7 +645,7 @@ module.exports = {
             if (!entry) {
               debug(
                 `Received resourceChangedPriority for requestId ${
-                  params.requestId
+                params.requestId
                 } with no matching request.`
               );
               continue;
@@ -576,10 +715,12 @@ module.exports = {
     return {
       log: {
         version: '1.2',
-        creator: { name, version, comment: homepage },
+        creator: { name: options.name, version: options.version, comment: options.comment },
         pages,
-        entries
+        entries,
+        _meta: options.meta
       }
     };
   }
 };
+
