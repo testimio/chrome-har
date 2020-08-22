@@ -234,7 +234,7 @@ module.exports = {
             // try to find that request in the 50 previous events
             if (params.loaderId === '' && params.request.method === 'OPTIONS' && params.initiator.type === 'other') {                
                 // hueristically, look in the last 50 events in reverse order (i.e. prefer the latest).
-                const latest = messages.slice(currentPosition - 50, currentPosition).reverse();
+                const latest = messages.slice(Math.max(0,currentPosition - 50), currentPosition).reverse();
                 const initiator = latest.find(x=> x.method === 'Network.requestWillBeSent' 
                                                     && x.params.request.method !== 'OPTIONS' 
                                                     && x.params.request.url === params.documentURL);
