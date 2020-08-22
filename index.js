@@ -231,9 +231,9 @@ module.exports = {
             }
 
             // OPTIONS calls have their own loader/initiator. However, this was created by a previous request
-            // try to find that request in the 10 previous events
+            // try to find that request in the 50 previous events
             if (params.loaderId === '' && params.request.method === 'OPTIONS' && params.initiator.type === 'other') {                
-                // hueristically, look in the last 10 calls in reverse order (i.e. prefer the latest).
+                // hueristically, look in the last 50 events in reverse order (i.e. prefer the latest).
                 const latest = messages.slice(currentPosition - 50, currentPosition).reverse();
                 const initiator = latest.find(x=> x.method === 'Network.requestWillBeSent' 
                                                     && x.params.request.method !== 'OPTIONS' 
@@ -296,7 +296,6 @@ module.exports = {
               request: req,
               time: 0,
               _initiator: params.initiator,
-              _initiator_detail: JSON.stringify(params.initiator),
               _initiator_type: params.initiator.type
             };
             if(typeof params.type === 'string') {
@@ -309,7 +308,6 @@ module.exports = {
             switch (params.initiator.type) {
               case 'parser':
                 {
-                  entry._initiator = params.initiator.url;
                   entry._initiator_line = params.initiator.lineNumber + 1; // Because lineNumber is 0 based
                 }
                 break;
@@ -321,7 +319,6 @@ module.exports = {
                     params.initiator.stack.callFrames.length > 0
                   ) {
                     const topCallFrame = params.initiator.stack.callFrames[0];
-                    entry._initiator = topCallFrame.url;
                     entry._initiator_line = topCallFrame.lineNumber + 1; // Because lineNumber is 0 based
                     entry._initiator_column = topCallFrame.columnNumber + 1; // Because columnNumber is 0 based
                     entry._initiator_function_name = topCallFrame.functionName;
