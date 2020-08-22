@@ -4,7 +4,7 @@ const uuid = require('uuid/v1');
 const dayjs = require('dayjs');
 const debug = require('debug')('chrome-har');
 const ignoredEvents = require('./lib/ignoredEvents');
-const { parseRequestCookies } = require('./lib/cookies');
+const { parseRequestCookies, parseResponseCookies, formatCookie } = require('./lib/cookies');
 const { getHeaderValue, parseHeaders } = require('./lib/headers');
 const {
   isHttp1x,
@@ -28,7 +28,7 @@ const defaultOptions = {
   includeCustomProperties: false,
   name: 'Testim',
   version: '1.0',
-  comment: 'Created during a text executed by Testim.',
+  comment: 'Created during a test executed by Testim.',
   meta: undefined,
   wallTimeHelper: {
     getWallTimeFromTimestamp(timestamp) {
@@ -77,7 +77,7 @@ function addFromFirstResponse(page, params, wallTimeHelper) {
 }
 
 
-function attachCustomProps(entry, params, ) {
+function attachCustomProps(entry, params) {
   const custom = params['_custom'];
   if (custom) {
     entry._testim = Object.assign(entry._testim || {}, custom);
@@ -93,7 +93,9 @@ module.exports = {
     const ignoredRequests = new Set(),
       rootFrameMappings = new Map(),
       loaders = new Map(),
-      recognizedOptionsCalls = new Map();
+      recognizedOptionsCalls = new Map(),
+      responseExtraInfo = new Map(),
+      requestExtraInfo = new Map();
 
     let pages = [],
       entries = [],
@@ -132,11 +134,11 @@ module.exports = {
         responsesWithoutPage = [];
       }
     }
-    
+
     for (let currentPosition = 0; currentPosition < messages.length; currentPosition++) {
-      const message = messages[currentPosition];  
+      const message = messages[currentPosition];
       const params = message.params;
-      const method = message.method;      
+      const method = message.method;
 
       if (!/^(Page|Network)\..+/.test(method)) {
         continue;
@@ -176,8 +178,8 @@ module.exports = {
             // this use-case usually happens when the debugger
             // is attached after the page request was sent, but before
             // the response was received. We assume that
-            // the page is request is one of the first 10 messages.
-            const responseInfo = messages.slice(0, 10)
+            // the page is request is one of the first 20 messages.
+            const responseInfo = messages.slice(0, 20)
               .find(x => x.method === 'Network.responseReceived' && x.params.requestId === params.frame.loaderId);
 
             if (responseInfo) {
@@ -230,24 +232,24 @@ module.exports = {
             }
 
             // OPTIONS calls have their own loader/initiator. However, this was created by a previous request
-            // try to find that request in the 10 previous events
-            if (params.loaderId === '' && params.request.method === 'OPTIONS' && params.initiator.type === 'other') {                
-                // hueristically, look in the last 10 calls in reverse order (i.e. prefer the latest).
-                const latest = messages.slice(currentPosition - 10, currentPosition).reverse();
-                const initiator = latest.find(x=> x.method === 'Network.requestWillBeSent' 
-                                                    && x.params.request.method !== 'OPTIONS' 
-                                                    && x.params.request.url === params.documentURL);
-                if (initiator) {
-                    params.loaderId = initiator.params.loaderId;
-                    params.frameId = initiator.params.frameId;
-                    // save for next events
-                    recognizedOptionsCalls.set(params.requestId, { loaderId: params.loaderId, frameId: params.frameId });
-                }
+            // try to find that request in the 50 previous events
+            if (params.loaderId === '' && params.request.method === 'OPTIONS' && params.initiator.type === 'other') {
+              // hueristically, look in the last 50 calls in reverse order (i.e. prefer the latest).
+              const latest = messages.slice(Math.max(0, currentPosition - 50), currentPosition).reverse();
+              const initiator = latest.find(x => x.method === 'Network.requestWillBeSent'
+                && x.params.request.method !== 'OPTIONS'
+                && x.params.request.url === params.documentURL);
+              if (initiator) {
+                params.loaderId = initiator.params.loaderId;
+                params.frameId = initiator.params.frameId;
+                // save for next events
+                recognizedOptionsCalls.set(params.requestId, { loaderId: params.loaderId, frameId: params.frameId });
+              }
             }
 
             // could not find loader for page
-            if (!loaders.has(params.loaderId)) {            
-                loaders.set(params.loaderId, params);
+            if (!loaders.has(params.loaderId)) {
+              loaders.set(params.loaderId, params);
             }
             const page = pages[pages.length - 1];
             const cookieHeader = getHeaderValue(request.headers, 'Cookie');
@@ -278,6 +280,10 @@ module.exports = {
               headers: parseHeaders(request.headers)
             };
 
+            if (requestExtraInfo.has(request.requestId)) {
+              addRequestExtraInfo(request, requestExtraInfo.get(request.requestId).headers);
+            }
+
             const entry = {
               cache: {},
               startedDateTime: '',
@@ -293,7 +299,7 @@ module.exports = {
               _initiator: params.initiator,
               _initiator_type: params.initiator.type
             };
-            if(typeof params.type === 'string') {
+            if (typeof params.type === 'string') {
               entry._resourceType = params.type.toLowerCase();
             }
             if (options.includeCustomProperties) {
@@ -445,6 +451,9 @@ module.exports = {
 
             try {
               populateEntryFromResponse(entry, params.response, options);
+              if (responseExtraInfo.has(params.requestId)) {
+                addResponseExtraInfo(entry.response, responseExtraInfo.get(params.requestId));
+              }
             } catch (e) {
               debug(
                 `Error parsing response: ${JSON.stringify(
@@ -513,17 +522,17 @@ module.exports = {
             if (options.includeCustomProperties) {
               attachCustomProps(entry, params);
             }
-            
-            if(entry._fromCache === 'memory') {
-                entry.time = 0;
-                entry.timings = cachedTimings(entry.__requestWillBeSentTime,params.timestamp);
+
+            if (entry._fromCache === 'memory') {
+              entry.time = 0;
+              entry.timings = cachedTimings(entry.__requestWillBeSentTime, params.timestamp);
             } else {
-                const timings = entry.timings || {};
-                const startTime = entry.__requestWillBeSentTime || entry._requestTime;
-                timings.receive = formatMillis((params.timestamp - startTime) * 1000 -entry.__receiveHeadersEnd);
-                const fullTime = max(0, timings.blocked) + max(0, timings.dns) + max(0, timings.connect) +
+              const timings = entry.timings || {};
+              const startTime = entry.__requestWillBeSentTime || entry._requestTime;
+              timings.receive = formatMillis((params.timestamp - startTime) * 1000 - entry.__receiveHeadersEnd);
+              const fullTime = max(0, timings.blocked) + max(0, timings.dns) + max(0, timings.connect) +
                 max(0, timings.send) + max(0, timings.wait) + max(0, timings.receive);
-                entry.time = Math.floor(1000 * fullTime) / 1000;
+              entry.time = Math.floor(1000 * fullTime) / 1000;
             }
             // For cached entries, Network.loadingFinished can have an earlier
             // timestamp than Network.dataReceived
@@ -653,6 +662,44 @@ module.exports = {
           }
           break;
 
+        case 'Network.responseReceivedExtraInfo':
+          {
+            const entry = entries.find(entry => entry._requestId === params.requestId);
+
+            responseExtraInfo.set(params.requestId, params);
+            if (!entry) {
+              debug(
+                `Received responseReceivedExtraInfo for requestId ${
+                params.requestId
+                } with no matching request.`
+              );
+              continue;
+            }
+            if (entry.response) {
+              addResponseExtraInfo(entry.response, params);
+            }
+          }
+          break;
+
+        case 'Network.requestWillBeSentExtraInfo':
+          {
+            const entry = entries.find(entry => entry._requestId === params.requestId);
+
+            requestExtraInfo.set(params.requestId, params);
+            if (!entry) {
+              debug(
+                `Received requestWillBeSentExtraInfo for requestId ${
+                params.requestId
+                } with no matching request.`
+              );
+              continue;
+            }
+            if (entry.request) {
+              addRequestExtraInfo(entry.request, params);
+            }
+          }
+          break;
+
         default:
           // Keep the old functionallity and log unknown events
           ignoredEvents(method);
@@ -661,9 +708,7 @@ module.exports = {
     }
 
     if (!options.includeResourcesFromDiskCache) {
-      entries = entries.filter(
-        entry => entry.cache.beforeRequest === undefined
-      );
+      entries = entries.filter(entry => entry.cache.beforeRequest === undefined);
     }
 
     const deleteInternalProperties = o => {
@@ -721,4 +766,47 @@ module.exports = {
     };
   }
 };
+
+function addRequestExtraInfo(request, requestExtraInfo) {
+    if (requestExtraInfo.headers) {
+      request.headers = parseHeaders(requestExtraInfo.headers);
+    }
+    if (requestExtraInfo.associatedCookies) {
+      try {
+        request.cookies = requestExtraInfo.associatedCookies
+          .filter(({ blockedReasons }) => !blockedReasons.length)
+          .map(({ cookie }) => formatCookie(cookie));
+      } catch(err) {
+        // better safe than sorry.
+      }
+    }
+  }
+  
+  function addResponseExtraInfo(response, responseExtraInfo) {
+    if (responseExtraInfo.headers) {
+      response.headers = parseHeaders(responseExtraInfo.headers);
+    }
+    if (responseExtraInfo.blockedCookies) {
+      try {
+        response.cookies = response.cookies.filter(
+          ({ name }) => !responseExtraInfo.blockedCookies.find(blockedCookie => {
+            if (blockedCookie.cookie) {
+              return blockedCookie.cookie.name === name;
+            }
+  
+            if (blockedCookie.cookieLine) {
+              const cookie = parseResponseCookies(blockedCookie.cookieLine)[0];
+              if (cookie) {
+                return cookie.name === name;
+              }
+            }
+  
+            return false;
+          })
+        );
+      } catch (err) {
+        // better safe than sorry
+      }
+    }
+  }
 
