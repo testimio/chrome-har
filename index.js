@@ -280,8 +280,11 @@ module.exports = {
               headers: parseHeaders(request.headers)
             };
 
-            if (requestExtraInfo.has(request.requestId)) {
-              addRequestExtraInfo(request, requestExtraInfo.get(request.requestId).headers);
+            const hasExtraInfo = requestExtraInfo.has(request.requestId);
+            if (hasExtraInfo) {
+              const extraInfoParams = requestExtraInfo.get(request.requestId);
+              addRequestExtraInfo(request, extraInfoParams.headers);
+              requestExtraInfo.delete(extraInfoParams);
             }
 
             const entry = {
@@ -297,7 +300,8 @@ module.exports = {
               request: req,
               time: 0,
               _initiator: params.initiator,
-              _initiator_type: params.initiator.type
+              _initiator_type: params.initiator.type,
+              __addedExtraInfo: hasExtraInfo,
             };
             if (typeof params.type === 'string') {
               entry._resourceType = params.type.toLowerCase();
@@ -665,8 +669,8 @@ module.exports = {
         case 'Network.responseReceivedExtraInfo':
           {
             const entry = entries.find(entry => entry._requestId === params.requestId);
-
             responseExtraInfo.set(params.requestId, params);
+
             if (!entry) {
               debug(
                 `Received responseReceivedExtraInfo for requestId ${
@@ -684,7 +688,6 @@ module.exports = {
         case 'Network.requestWillBeSentExtraInfo':
           {
             const entry = entries.find(entry => entry._requestId === params.requestId);
-
             requestExtraInfo.set(params.requestId, params);
             if (!entry) {
               debug(
@@ -694,8 +697,10 @@ module.exports = {
               );
               continue;
             }
-            if (entry.request) {
+            if (entry.request && !entry.__addedExtraInfo) {
               addRequestExtraInfo(entry.request, params);
+              entry.__addedExtraInfo = true;
+              requestExtraInfo.delete(params);
             }
           }
           break;
@@ -768,45 +773,45 @@ module.exports = {
 };
 
 function addRequestExtraInfo(request, requestExtraInfo) {
-    if (requestExtraInfo.headers) {
-      request.headers = parseHeaders(requestExtraInfo.headers);
-    }
-    if (requestExtraInfo.associatedCookies) {
-      try {
-        request.cookies = requestExtraInfo.associatedCookies
-          .filter(({ blockedReasons }) => !blockedReasons.length)
-          .map(({ cookie }) => formatCookie(cookie));
-      } catch(err) {
-        // better safe than sorry.
-      }
+  if (requestExtraInfo.headers) {
+    request.headers = parseHeaders(requestExtraInfo.headers);
+  }
+  if (requestExtraInfo.associatedCookies) {
+    try {
+      request.cookies = requestExtraInfo.associatedCookies
+        .filter(({ blockedReasons }) => !blockedReasons.length)
+        .map(({ cookie }) => formatCookie(cookie));
+    } catch (err) {
+      // better safe than sorry.
     }
   }
-  
-  function addResponseExtraInfo(response, responseExtraInfo) {
-    if (responseExtraInfo.headers) {
-      response.headers = parseHeaders(responseExtraInfo.headers);
-    }
-    if (responseExtraInfo.blockedCookies) {
-      try {
-        response.cookies = response.cookies.filter(
-          ({ name }) => !responseExtraInfo.blockedCookies.find(blockedCookie => {
-            if (blockedCookie.cookie) {
-              return blockedCookie.cookie.name === name;
+}
+
+function addResponseExtraInfo(response, responseExtraInfo) {
+  if (responseExtraInfo.headers) {
+    response.headers = parseHeaders(responseExtraInfo.headers);
+  }
+  if (responseExtraInfo.blockedCookies) {
+    try {
+      response.cookies = response.cookies.filter(
+        ({ name }) => !responseExtraInfo.blockedCookies.find(blockedCookie => {
+          if (blockedCookie.cookie) {
+            return blockedCookie.cookie.name === name;
+          }
+
+          if (blockedCookie.cookieLine) {
+            const cookie = parseResponseCookies(blockedCookie.cookieLine)[0];
+            if (cookie) {
+              return cookie.name === name;
             }
-  
-            if (blockedCookie.cookieLine) {
-              const cookie = parseResponseCookies(blockedCookie.cookieLine)[0];
-              if (cookie) {
-                return cookie.name === name;
-              }
-            }
-  
-            return false;
-          })
-        );
-      } catch (err) {
-        // better safe than sorry
-      }
+          }
+
+          return false;
+        })
+      );
+    } catch (err) {
+      // better safe than sorry
     }
   }
+}
 
