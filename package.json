@@ -1,5 +1,5 @@
 {
-  "name": "chrome-har",
+  "name": "@testim/chrome-har",
   "version": "0.11.3",
   "description": "Create HAR files from Chrome Debugging Protocol data.",
   "main": "index.js",
@@ -16,10 +16,10 @@
     "webperf"
   ],
   "author": "Tobias Lidskog <tobias@lidskog.se>",
-  "homepage": "https://github.com/sitespeedio/chrome-har",
+  "homepage": "https://github.com/testimio/chrome-har",
   "repository": {
     "type": "git",
-    "url": "https://github.com/sitespeedio/chrome-har.git"
+    "url": "https://github.com/testimio/chrome-har.git"
   },
   "license": "MIT",
   "devDependencies": {
